@@ -206,6 +206,11 @@ async function fetchSessionsPage(
 
     const responseText = await response.text()
     const isLastProxy = index === SESSION_PROXY_PATHS.length - 1
+    const contentType = response.headers.get('content-type') ?? ''
+    const looksLikeJson =
+      contentType.toLowerCase().includes('application/json') ||
+      responseText.trim().startsWith('{') ||
+      responseText.trim().startsWith('[')
 
     if (!response.ok) {
       if (response.status === 404 && !isLastProxy) {
@@ -220,9 +225,25 @@ async function fetchSessionsPage(
       )
     }
 
+    if (!looksLikeJson) {
+      if (!isLastProxy) {
+        continue
+      }
+
+      throw new HelenaApiError(
+        'A resposta recebida nao esta em um formato valido.',
+        'INVALID_JSON',
+        response.status,
+      )
+    }
+
     try {
       return JSON.parse(responseText) as HelenaSessionsPage
     } catch {
+      if (!isLastProxy) {
+        continue
+      }
+
       throw new HelenaApiError(
         'A API retornou um JSON invalido.',
         'INVALID_JSON',
