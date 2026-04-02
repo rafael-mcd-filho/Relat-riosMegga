@@ -147,7 +147,7 @@ type StatusBadgeProps = {
 type ChartSeries = {
   id: string
   color: string
-  data: Array<{ x: string; y: number }>
+  data: Array<{ x: string; y: number; dateKey: string; displayLabel: string }>
 }
 
 type TrendChartProps = {
@@ -285,6 +285,8 @@ function createSingleLineData(items: TrendPoint[]): ChartSeries[] {
       data: items.map((item) => ({
         x: item.label,
         y: item.total,
+        dateKey: item.key,
+        displayLabel: item.label,
       })),
     },
   ]
@@ -297,6 +299,8 @@ function createMultiLineData(series: GroupedTrendSeries[]): ChartSeries[] {
     data: item.points.map((point) => ({
       x: point.label,
       y: point.total,
+      dateKey: point.key,
+      displayLabel: point.label,
     })),
   }))
 }
@@ -315,6 +319,24 @@ function getChartSummary(series: ChartSeries[]) {
     average: dayCount === 0 ? 0 : Math.round(total / dayCount),
     peak,
   }
+}
+
+function extractDateKeyFromInteraction(interaction: {
+  data?: { dateKey?: string; x?: string | number }
+  points?: ReadonlyArray<{
+    data?: { dateKey?: string; x?: string | number }
+  }>
+}) {
+  if (interaction.data) {
+    return String(interaction.data.dateKey ?? interaction.data.x ?? '')
+  }
+
+  if (interaction.points && interaction.points.length > 0) {
+    const firstPoint = interaction.points[0]
+    return String(firstPoint.data?.dateKey ?? firstPoint.data?.x ?? '')
+  }
+
+  return ''
 }
 
 function hasAdvancedTrendFilters(filters: AdvancedTrendFilters) {
@@ -478,30 +500,21 @@ function LoadingModal() {
 }
 
 function MultiLineSliceTooltip({ slice }: NivoSliceTooltipProps<ChartSeries>) {
-  const sortedPoints = [...slice.points].sort(
-    (left, right) => Number(right.data.y ?? 0) - Number(left.data.y ?? 0),
-  )
+  const total = slice.points.reduce((sum, point) => sum + Number(point.data.y ?? 0), 0)
 
   return (
-    <div className="chart-tooltip">
+    <div className="chart-tooltip chart-tooltip-compact">
       <strong className="chart-tooltip-title">
-        {String(sortedPoints[0]?.data.xFormatted ?? sortedPoints[0]?.id ?? '')}
+        {String(
+          slice.points[0]?.data.displayLabel ??
+            slice.points[0]?.data.xFormatted ??
+            slice.points[0]?.id ??
+            '',
+        )}
       </strong>
-
-      <div className="chart-tooltip-list">
-        {sortedPoints.map((point) => (
-          <div key={String(point.id)} className="chart-tooltip-row">
-            <span className="chart-tooltip-label">
-              <span
-                className="chart-tooltip-swatch"
-                style={{ backgroundColor: point.color }}
-                aria-hidden="true"
-              />
-              <span>{String(point.seriesId)}</span>
-            </span>
-            <strong>{formatTotal(Number(point.data.y ?? 0))}</strong>
-          </div>
-        ))}
+      <div className="chart-tooltip-compact-meta">
+        <span>{formatTotal(total)} no total</span>
+        <span>{formatTotal(slice.points.length)} series</span>
       </div>
     </div>
   )
@@ -891,6 +904,30 @@ function TrendChart({ items, filterSummary, onOpenAdvancedFilters }: TrendChartP
 
 function MultiLineChart({ title, subtitle, series }: MultiLineChartProps) {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null)
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null)
+
+  const fallbackDateKey = series[0]?.points[series[0].points.length - 1]?.key ?? null
+  const effectiveSelectedDateKey = series.some((item) =>
+    item.points.some((point) => point.key === selectedDateKey),
+  )
+    ? selectedDateKey
+    : fallbackDateKey
+
+  const selectedDayRows = useMemo(
+    () =>
+      series
+        .map((item, index) => ({
+          id: item.id,
+          label: item.label,
+          color: resolveSeriesColor(item.label, index),
+          total:
+            item.points.find((point) => point.key === effectiveSelectedDateKey)?.total ??
+            item.points[item.points.length - 1]?.total ??
+            0,
+        }))
+        .sort((left, right) => right.total - left.total),
+    [effectiveSelectedDateKey, series],
+  )
 
   if (series.length === 0 || series[0]?.points.length === 0) {
     return (
@@ -915,6 +952,11 @@ function MultiLineChart({ title, subtitle, series }: MultiLineChartProps) {
   const tickValues = selectTickValues(series[0].points)
   const summary = getChartSummary(activeData)
   const totalSummary = getChartSummary(data)
+
+  const selectedDateLabel =
+    series[0]?.points.find((point) => point.key === effectiveSelectedDateKey)?.label ??
+    series[0]?.points[series[0].points.length - 1]?.label ??
+    ''
 
   return (
     <section className="panel chart-panel">
@@ -1004,10 +1046,48 @@ function MultiLineChart({ title, subtitle, series }: MultiLineChartProps) {
           useMesh
           enableSlices="x"
           sliceTooltip={MultiLineSliceTooltip}
+          onMouseMove={(interaction) => {
+            const nextDateKey = extractDateKeyFromInteraction(interaction)
+            if (nextDateKey) {
+              setSelectedDateKey(nextDateKey)
+            }
+          }}
+          onClick={(interaction) => {
+            const nextDateKey = extractDateKeyFromInteraction(interaction)
+            if (nextDateKey) {
+              setSelectedDateKey(nextDateKey)
+            }
+          }}
           enableCrosshair
           crosshairType="x"
           legends={[]}
         />
+      </div>
+
+      <div className="chart-day-summary">
+        <div className="chart-day-summary-head">
+          <div>
+            <span className="panel-kicker">Resumo do dia</span>
+            <h3>{selectedDateLabel}</h3>
+            <p>Passe o mouse no grafico ou clique em um ponto para atualizar esta lista.</p>
+          </div>
+        </div>
+
+        <div className="chart-day-summary-list">
+          {selectedDayRows.map((item) => (
+            <div key={item.id} className="chart-day-summary-row">
+              <span className="chart-day-summary-label">
+                <span
+                  className="chart-tooltip-swatch"
+                  style={{ backgroundColor: item.color }}
+                  aria-hidden="true"
+                />
+                <span title={item.label}>{item.label}</span>
+              </span>
+              <strong>{formatTotal(item.total)}</strong>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   )
