@@ -25,7 +25,7 @@ function createHelenaProxyMiddleware(
       res.end(
         JSON.stringify({
           error: true,
-          text: 'HELENA_API_TOKEN nao configurado no ambiente local',
+          text: 'A integracao da API nao esta configurada no ambiente local.',
         }),
       )
       return
@@ -57,7 +57,7 @@ function createHelenaProxyMiddleware(
       res.end(
         JSON.stringify({
           error: true,
-          text: error instanceof Error ? error.message : 'Erro ao consultar Helena API',
+          text: error instanceof Error ? error.message : 'Erro ao consultar a integracao de dados',
         }),
       )
     }

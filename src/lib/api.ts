@@ -1,6 +1,6 @@
 import type { Filters, HelenaSessionsDataset, HelenaSessionsPage } from '../types'
 
-const HELENA_PROXY_PATH = '/api/helena/sessions'
+const SESSION_PROXY_PATHS = ['/api/helena/sessions.php', '/api/helena/sessions']
 const DEFAULT_PAGE_SIZE = 100
 
 type SessionQueryOverrides = {
@@ -29,6 +29,15 @@ export class HelenaApiError extends Error {
     this.code = code
     this.status = status
   }
+}
+
+function sanitizePublicErrorMessage(message: string) {
+  const normalized = message
+    .replace(/HELENA_API_TOKEN/gi, 'API_TOKEN')
+    .replace(/Helena API/gi, 'integracao de dados')
+    .replace(/Helena/gi, 'integracao')
+
+  return normalized
 }
 
 function getStatusFallbackMessage(status: number) {
@@ -64,27 +73,27 @@ function pickErrorMessage(payload: HelenaApiErrorPayload | null, status: number)
   const message = payload.message
 
   if (Array.isArray(message) && message[0]) {
-    return String(message[0])
+    return sanitizePublicErrorMessage(String(message[0]))
   }
 
   if (typeof message === 'string' && message.trim()) {
-    return message
+    return sanitizePublicErrorMessage(message)
   }
 
   if (typeof payload.detail === 'string' && payload.detail.trim()) {
-    return payload.detail
+    return sanitizePublicErrorMessage(payload.detail)
   }
 
   if (typeof payload.title === 'string' && payload.title.trim()) {
-    return payload.title
+    return sanitizePublicErrorMessage(payload.title)
   }
 
   if (typeof payload.error === 'string' && payload.error.trim()) {
-    return payload.error
+    return sanitizePublicErrorMessage(payload.error)
   }
 
   if (typeof payload.text === 'string' && payload.text.trim()) {
-    return payload.text
+    return sanitizePublicErrorMessage(payload.text)
   }
 
   return getStatusFallbackMessage(status)
@@ -186,33 +195,43 @@ async function fetchSessionsPage(
     pageSize: DEFAULT_PAGE_SIZE,
   })
 
-  const response = await fetch(`${HELENA_PROXY_PATH}?${params.toString()}`, {
-    headers: {
-      accept: 'application/json',
-    },
-    signal,
-  })
+  for (let index = 0; index < SESSION_PROXY_PATHS.length; index += 1) {
+    const proxyPath = SESSION_PROXY_PATHS[index]
+    const response = await fetch(`${proxyPath}?${params.toString()}`, {
+      headers: {
+        accept: 'application/json',
+      },
+      signal,
+    })
 
-  const responseText = await response.text()
+    const responseText = await response.text()
+    const isLastProxy = index === SESSION_PROXY_PATHS.length - 1
 
-  if (!response.ok) {
-    const payload = parseErrorPayload(responseText)
-    throw new HelenaApiError(
-      pickErrorMessage(payload, response.status),
-      pickErrorCode(payload, response.status),
-      response.status,
-    )
+    if (!response.ok) {
+      if (response.status === 404 && !isLastProxy) {
+        continue
+      }
+
+      const payload = parseErrorPayload(responseText)
+      throw new HelenaApiError(
+        pickErrorMessage(payload, response.status),
+        pickErrorCode(payload, response.status),
+        response.status,
+      )
+    }
+
+    try {
+      return JSON.parse(responseText) as HelenaSessionsPage
+    } catch {
+      throw new HelenaApiError(
+        'A API retornou um JSON invalido.',
+        'INVALID_JSON',
+        response.status,
+      )
+    }
   }
 
-  try {
-    return JSON.parse(responseText) as HelenaSessionsPage
-  } catch {
-    throw new HelenaApiError(
-      'A API retornou um JSON invalido.',
-      'INVALID_JSON',
-      response.status,
-    )
-  }
+  throw new HelenaApiError('O endpoint de atendimentos nao foi encontrado.', '404', 404)
 }
 
 function hasReachedLastPage(page: HelenaSessionsPage) {
@@ -251,8 +270,15 @@ export async function fetchSessionsJson(filters: Filters, signal?: AbortSignal) 
 
 export function getApiErrorDisplay(error: unknown) {
   if (error instanceof HelenaApiError) {
+    const messageByCode: Record<string, string> = {
+      MISSING_API_TOKEN: 'A integracao da API nao esta configurada neste ambiente.',
+      UPSTREAM_ERROR: 'O servico de dados nao respondeu corretamente.',
+      METHOD_NOT_ALLOWED: 'O metodo da requisicao nao e permitido.',
+      INVALID_JSON: 'A resposta recebida nao esta em um formato valido.',
+    }
+
     return {
-      message: error.message,
+      message: messageByCode[error.code] ?? sanitizePublicErrorMessage(error.message),
       code: error.code,
     }
   }
