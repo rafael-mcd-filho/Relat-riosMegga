@@ -67,10 +67,20 @@ function buildLookup<T extends { id: string; name: string }>(items: T[]) {
   return new Map(items.map((item) => [item.id, item.name]))
 }
 
+function buildUnknownLabel(id: string) {
+  return `Nao identificado (${id.slice(0, 8)})`
+}
+
+function resolveGroupLabel(label: string | null, id: string) {
+  return label ?? buildUnknownLabel(id)
+}
+
 const channelLookup = buildLookup(channels)
 const teamLookup = buildLookup(teams)
 const userLookup = buildLookup(users)
 const channelTypeLookup = new Map(channels.map((channel) => [channel.id, channel.type ?? null]))
+const MISSING_USER_GROUP_ID = '__missing-user__'
+const MISSING_USER_GROUP_LABEL = 'Sem usuario'
 
 function normalizeChannelTypeLabel(value: string | null | undefined) {
   if (!value) {
@@ -265,7 +275,7 @@ function buildCountList(
   return sortByCountDesc(
     [...totals.entries()].map(([id, total]) => ({
       id,
-      label: labels.get(id) ?? 'Nao identificado',
+      label: labels.get(id) ?? buildUnknownLabel(id),
       total,
     })),
   )
@@ -329,7 +339,7 @@ export function buildChannelSeries(
 
     return {
       id,
-      label: getSessionChannelLabel(item, id) ?? 'Nao identificado',
+      label: resolveGroupLabel(getSessionChannelLabel(item, id), id),
     }
   })
 }
@@ -348,7 +358,7 @@ export function buildTeamSeries(
 
     return {
       id,
-      label: getSessionTeamLabel(item, id) ?? 'Nao identificado',
+      label: resolveGroupLabel(getSessionTeamLabel(item, id), id),
     }
   })
 }
@@ -362,12 +372,15 @@ export function buildUserSeries(
     const id = getSessionUserKey(item)
 
     if (!id) {
-      return null
+      return {
+        id: MISSING_USER_GROUP_ID,
+        label: MISSING_USER_GROUP_LABEL,
+      }
     }
 
     return {
       id,
-      label: getSessionUserLabel(item, id) ?? 'Nao identificado',
+      label: resolveGroupLabel(getSessionUserLabel(item, id), id),
     }
   })
 }

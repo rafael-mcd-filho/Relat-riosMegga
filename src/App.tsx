@@ -146,6 +146,7 @@ type StatusBadgeProps = {
 
 type ChartSeries = {
   id: string
+  label: string
   color: string
   data: Array<{ x: string; y: number; dateKey: string; displayLabel: string }>
 }
@@ -281,6 +282,7 @@ function createSingleLineData(items: TrendPoint[]): ChartSeries[] {
   return [
     {
       id: 'Atendimentos',
+      label: 'Atendimentos',
       color: '#2563EB',
       data: items.map((item) => ({
         x: item.label,
@@ -294,7 +296,8 @@ function createSingleLineData(items: TrendPoint[]): ChartSeries[] {
 
 function createMultiLineData(series: GroupedTrendSeries[]): ChartSeries[] {
   return series.map((item, index) => ({
-    id: item.label,
+    id: item.id,
+    label: item.label,
     color: resolveSeriesColor(item.label, index),
     data: item.points.map((point) => ({
       x: point.label,
@@ -309,10 +312,28 @@ function getChartSeriesTotal(series: ChartSeries) {
   return series.data.reduce((sum, point) => sum + point.y, 0)
 }
 
+function getChartPeakTotalByDay(series: ChartSeries[]) {
+  const totalsByDate = new Map<string, number>()
+
+  for (const item of series) {
+    for (const point of item.data) {
+      totalsByDate.set(point.dateKey, (totalsByDate.get(point.dateKey) ?? 0) + point.y)
+    }
+  }
+
+  let peak = 0
+
+  for (const total of totalsByDate.values()) {
+    peak = Math.max(peak, total)
+  }
+
+  return peak
+}
+
 function getChartSummary(series: ChartSeries[]) {
   const total = series.reduce((sum, item) => sum + getChartSeriesTotal(item), 0)
   const dayCount = series[0]?.data.length ?? 0
-  const peak = Math.max(...series.flatMap((item) => item.data.map((point) => point.y)), 0)
+  const peak = getChartPeakTotalByDay(series)
 
   return {
     total,
@@ -501,20 +522,18 @@ function LoadingModal() {
 
 function MultiLineSliceTooltip({ slice }: NivoSliceTooltipProps<ChartSeries>) {
   const total = slice.points.reduce((sum, point) => sum + Number(point.data.y ?? 0), 0)
+  const dayLabel = String(
+    slice.points[0]?.data.displayLabel ?? slice.points[0]?.data.xFormatted ?? slice.points[0]?.id ?? '',
+  )
 
   return (
     <div className="chart-tooltip chart-tooltip-compact">
-      <strong className="chart-tooltip-title">
-        {String(
-          slice.points[0]?.data.displayLabel ??
-            slice.points[0]?.data.xFormatted ??
-            slice.points[0]?.id ??
-            '',
-        )}
-      </strong>
-      <div className="chart-tooltip-compact-meta">
-        <span>{formatTotal(total)} no total</span>
-        <span>{formatTotal(slice.points.length)} series</span>
+      <div className="chart-tooltip-compact-head">
+        <strong className="chart-tooltip-date-badge">{dayLabel}</strong>
+      </div>
+      <div className="chart-tooltip-compact-metric">
+        <span className="chart-tooltip-total-label">Total do dia</span>
+        <strong className="chart-tooltip-total-value">{formatTotal(total)}</strong>
       </div>
     </div>
   )
@@ -1008,7 +1027,7 @@ function MultiLineChart({ title, subtitle, series }: MultiLineChartProps) {
               style={{ backgroundColor: item.color }}
               aria-hidden="true"
             />
-            <span title={String(item.id)}>{String(item.id)}</span>
+            <span title={item.label}>{item.label}</span>
             <strong>{formatTotal(getChartSeriesTotal(item))}</strong>
           </button>
         ))}
